@@ -289,6 +289,8 @@
     </section>
   </main>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script>
     const STORAGE_KEY = "orgPeopleEventsPWA_v7_fixed_units";
     function normalizeUnitName(unit) {
@@ -296,13 +298,71 @@
       if (clean === "מפח") return "מפח\"ט";
       return clean;
     }
-    let people = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]").map(p => ({ ...p, unit: normalizeUnitName(p.unit) }));
+    let people = [];
     let selectedUnit = "all";
     const allowedUnits = ['מפח"ט', '212', '217', '621', 'ביה"ס', 'יחס"מ', '6212', '6217', 'אחר'];
     const $ = (id) => document.getElementById(id);
 
+    const firebaseConfig = {
+      apiKey: "AIzaSyACCyeExz1Xf80N6xs4kaSTGO7YcWfOslS",
+      authDomain: "logistics89-fa529.firebaseapp.com",
+      projectId: "logistics89-fa529",
+      storageBucket: "logistics89-fa529.firebasestorage.app",
+      messagingSenderId: "898245761567",
+      appId: "1:898245761567:web:7b9981639d4157a48bd32a",
+      measurementId: "G-KTW88316MN"
+    };
+
+    let db = null;
+    let peopleCollection = null;
+    let firebaseReady = false;
+
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+      peopleCollection = db.collection("people");
+      firebaseReady = true;
+    } catch (err) {
+      console.error("Firebase init error", err);
+    }
+
     function createId() { return "id-" + Date.now() + "-" + Math.random().toString(16).slice(2); }
-    function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(people)); render(); }
+
+    function saveLocalBackup() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(people));
+    }
+
+    async function savePersonToCloud(person) {
+      if (!firebaseReady || !peopleCollection) throw new Error("Firebase לא מחובר");
+      await peopleCollection.doc(person.id).set(person);
+    }
+
+    async function deletePersonFromCloud(id) {
+      if (!firebaseReady || !peopleCollection) throw new Error("Firebase לא מחובר");
+      await peopleCollection.doc(id).delete();
+    }
+
+    function startCloudSync() {
+      if (!firebaseReady || !peopleCollection) {
+        people = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]").map(p => ({ ...p, unit: normalizeUnitName(p.unit) }));
+        render();
+        alert("Firebase לא מחובר. הנתונים יישמרו רק במכשיר הזה.");
+        return;
+      }
+      peopleCollection.onSnapshot(snapshot => {
+        people = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .map(p => ({ ...p, unit: normalizeUnitName(p.unit) }));
+        saveLocalBackup();
+        updateSupervisorOptions();
+        render();
+      }, err => {
+        console.error("Firestore sync error", err);
+        people = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]").map(p => ({ ...p, unit: normalizeUnitName(p.unit) }));
+        render();
+        alert("לא ניתן לקרוא נתונים מהענן. בדוק את חוקי Firestore או את החיבור לאינטרנט.");
+      });
+    }
 
     function todayIso() {
       const d = new Date();
@@ -700,10 +760,14 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
-    function deletePerson(id) {
+    async function deletePerson(id) {
       if (!confirm("למחוק את בעל התפקיד?")) return;
-      people = people.filter(x => x.id !== id);
-      save();
+      try {
+        await deletePersonFromCloud(id);
+      } catch (err) {
+        console.error(err);
+        alert("המחיקה לא נשמרה בענן. בדוק חיבור והרשאות Firestore.");
+      }
     }
 
     function switchTab(tabName) {
@@ -725,7 +789,7 @@
     $("treeUnitSelect").addEventListener("change", renderUnitTree);
     $("refreshTree").addEventListener("click", renderUnitTree);
 
-    $("personForm").addEventListener("submit", function(e) {
+    $("personForm").addEventListener("submit", async function(e) {
       e.preventDefault();
       const fullName = $("fullName").value.trim();
       const role = $("role").value.trim();
@@ -748,17 +812,20 @@
         specialEvents: parseSpecialEvents($("specialEvents").value),
         notes: $("notes").value.trim()
       };
-      const existingIndex = people.findIndex(x => x.id === id);
-      if (existingIndex >= 0) people[existingIndex] = person;
-      else people.push(person);
-      save();
-      resetForm();
-      switchTab("dashboard");
-      alert("נשמר בהצלחה.");
+      try {
+        await savePersonToCloud(person);
+        resetForm();
+        switchTab("dashboard");
+        alert("נשמר בהצלחה בענן.");
+      } catch (err) {
+        console.error(err);
+        alert("השמירה לא הצליחה בענן. בדוק חיבור והרשאות Firestore.");
+      }
     });
 
     updateSupervisorOptions();
     render();
+    startCloudSync();
   </script>
 </body>
 </html>
