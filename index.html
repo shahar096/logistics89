@@ -411,12 +411,18 @@
     }
 
     function updateSupervisorOptions() {
-      const unit = $("unit").value;
+      const selectedUnit = normalizeUnitName($("unit").value);
       const currentId = $("personId").value;
-      const options = people.filter(p => p.unit === unit && p.id !== currentId);
       const currentValue = $("supervisorId").value;
+
+      const options = people
+        .map(p => ({ ...p, unit: normalizeUnitName(p.unit) }))
+        .filter(p => p.id !== currentId && (!selectedUnit || p.unit === selectedUnit))
+        .sort((a, b) => String(a.fullName || "").localeCompare(String(b.fullName || ""), "he"));
+
       $("supervisorId").innerHTML = `<option value="">ללא / לא הוגדר</option>` +
-        options.map(p => `<option value="${p.id}">${p.fullName} - ${p.role || "ללא תפקיד"}</option>`).join("");
+        options.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.fullName)} - ${escapeHtml(p.role || "ללא תפקיד")}</option>`).join("");
+
       if (options.some(p => p.id === currentValue)) $("supervisorId").value = currentValue;
     }
 
@@ -714,6 +720,8 @@
     $("timelineStart").addEventListener("change", renderTimeline);
     $("timelineEnd").addEventListener("change", renderTimeline);
     $("unit").addEventListener("change", updateSupervisorOptions);
+    $("supervisorId").addEventListener("focus", updateSupervisorOptions);
+    $("supervisorId").addEventListener("click", updateSupervisorOptions);
     $("treeUnitSelect").addEventListener("change", renderUnitTree);
     $("refreshTree").addEventListener("click", renderUnitTree);
 
