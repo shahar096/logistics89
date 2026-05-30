@@ -525,6 +525,7 @@
             <label>תאריך <input id="scheduleDateView" type="date" disabled /></label>
           </div>
           <label>תוכן הלו"ז <input id="scheduleTitle" required /></label>
+          <label>מיקום <input id="scheduleLocation" /></label>
           <label>משתתפים <input id="scheduleParticipants" /></label>
           <label>הערות <textarea id="scheduleNotes"></textarea></label>
           <div class="actions"><button type="submit">שמירה</button><button type="button" class="secondary" id="closeScheduleModal">סגירה</button></div>
@@ -1139,12 +1140,17 @@
       const grid = $("calendarGrid"); if (!grid) return; initCalendarMonth();
       const [y,m] = $("calendarMonth").value.split("-").map(Number);
       const first = new Date(y, m-1, 1); const start = new Date(first); start.setDate(start.getDate() - start.getDay());
-      const labels = ["א","ב","ג","ד","ה","ו","ש"];
+      const labels = ["שבוע","א","ב","ג","ד","ה","ו","ש"];
       let html = labels.map(l => `<div class="calendar-day" style="min-height:auto;font-weight:bold;text-align:center;background:#fee2e2">${l}</div>`).join("");
-      for (let i=0;i<42;i++) {
-        const d = new Date(start); d.setDate(start.getDate()+i); const dateStr = iso(d);
-        const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
-        html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()} <span class="hint">שבוע ${weekNumber(d)}</span></div>${dayItems.slice(0,3).map(x=>`<span class="mini-event">${escapeHtml(x.start||"")} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+      for (let row=0; row<6; row++) {
+        const weekDate = new Date(start); weekDate.setDate(start.getDate() + row*7);
+        html += `<div class="calendar-day" style="min-height:auto;text-align:center;font-weight:bold;background:#fff1f2">ש${weekNumber(weekDate)}</div>`;
+        for (let col=0; col<7; col++) {
+          const i=row*7+col;
+          const d = new Date(start); d.setDate(start.getDate()+i); const dateStr = iso(d);
+          const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+          html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()}</div>${dayItems.slice(0,3).map(x=>`<span class="mini-event">${escapeHtml(x.start||"")} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+        }
       }
       grid.innerHTML = html;
     }
@@ -1271,12 +1277,17 @@
       const grid = $("calendarGrid"); if (!grid) return; initCalendarMonth();
       const [y,m] = $("calendarMonth").value.split("-").map(Number);
       const first = new Date(y, m-1, 1); const start = new Date(first); start.setDate(start.getDate() - start.getDay());
-      const labels = ["א","ב","ג","ד","ה","ו","ש"];
+      const labels = ["שבוע","א","ב","ג","ד","ה","ו","ש"];
       let html = labels.map(l => `<div class="calendar-day" style="min-height:auto;font-weight:bold;text-align:center;background:#fee2e2">${l}</div>`).join("");
-      for (let i=0;i<42;i++) {
-        const d = new Date(start); d.setDate(start.getDate()+i); const dateStr = iso(d);
-        const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
-        html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()} <span class="hint">שבוע ${weekNumber(d)}</span></div>${dayItems.slice(0,3).map(x=>`<span class="mini-event">${escapeHtml(x.start||"")} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+      for (let row=0; row<6; row++) {
+        const weekDate = new Date(start); weekDate.setDate(start.getDate() + row*7);
+        html += `<div class="calendar-day" style="min-height:auto;text-align:center;font-weight:bold;background:#fff1f2">ש${weekNumber(weekDate)}</div>`;
+        for (let col=0; col<7; col++) {
+          const i=row*7+col;
+          const d = new Date(start); d.setDate(start.getDate()+i); const dateStr = iso(d);
+          const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+          html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()}</div>${dayItems.slice(0,3).map(x=>`<span class="mini-event">${escapeHtml(x.start||"")} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+        }
       }
       grid.innerHTML = html;
     }
@@ -2109,6 +2120,138 @@
         setTimeout(() => renderStats(), 500);
       });
     }
+
+    /* V31 updates: calendar week column, schedule location, icon buttons for people */
+    (function applyV31Updates(){
+      const style = document.createElement("style");
+      style.textContent = `
+        .calendar-grid { grid-template-columns: 74px repeat(7, minmax(0,1fr)); }
+        .calendar-week-cell { min-height:110px; border:1px solid var(--border); border-radius:16px; padding:8px; background:#fff1f2; display:flex; align-items:center; justify-content:center; font-weight:800; color:var(--primary); text-align:center; }
+        .calendar-week-head { min-height:auto; font-weight:bold; text-align:center; background:#fecaca; }
+        @media (max-width: 760px) { .calendar-grid { grid-template-columns: 56px repeat(7, minmax(78px,1fr)); overflow-x:auto; } .calendar-week-cell{font-size:12px;} }
+      `;
+      document.head.appendChild(style);
+
+      const form = document.getElementById("scheduleForm");
+      if (form && !document.getElementById("scheduleLocation")) {
+        const titleLabel = document.getElementById("scheduleTitle")?.closest("label");
+        if (titleLabel) titleLabel.insertAdjacentHTML("afterend", '<label>מיקום <input id="scheduleLocation" /></label>');
+      }
+
+      renderCalendar = function() {
+        const grid = document.getElementById("calendarGrid"); if (!grid) return; initCalendarMonth();
+        const [y,m] = document.getElementById("calendarMonth").value.split("-").map(Number);
+        const first = new Date(y, m-1, 1);
+        const start = new Date(first); start.setDate(start.getDate() - start.getDay());
+        const labels = ["שבוע","א","ב","ג","ד","ה","ו","ש"];
+        let html = labels.map((l,idx) => `<div class="calendar-day ${idx===0?'calendar-week-head':''}" style="min-height:auto;font-weight:bold;text-align:center;background:${idx===0?'#fecaca':'#fee2e2'}">${l}</div>`).join("");
+        for (let row=0; row<6; row++) {
+          const weekStart = new Date(start); weekStart.setDate(start.getDate() + row*7);
+          html += `<div class="calendar-week-cell">שבוע<br>${weekNumber(weekStart)}</div>`;
+          for (let col=0; col<7; col++) {
+            const d = new Date(weekStart); d.setDate(weekStart.getDate()+col); const dateStr = iso(d);
+            const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+            html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()}</div>${dayItems.slice(0,3).map(x=>`<span class="mini-event">${escapeHtml(x.start||"")} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+          }
+        }
+        grid.innerHTML = html;
+      };
+
+      const oldOpenScheduleModal = openScheduleModal;
+      openScheduleModal = function(dateStr) {
+        oldOpenScheduleModal(dateStr);
+        if (document.getElementById("scheduleLocation")) document.getElementById("scheduleLocation").value = "";
+      };
+
+      renderDaySchedule = function(dateStr) {
+        const el = document.getElementById("dayScheduleList"); if (!el) return;
+        const items = schedules.filter(x=>x.date===dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+        el.className = items.length ? "list" : "list empty";
+        el.innerHTML = items.length ? items.map(x=>`<div class="item"><h3>${escapeHtml(x.start)} | ${escapeHtml(x.title)}</h3><p><b>משך:</b> ${escapeHtml(x.duration)} דקות</p><p><b>מיקום:</b> ${escapeHtml(x.location||"-")}</p><p><b>משתתפים:</b> ${escapeHtml(x.participants||"-")}</p><p><b>הערות:</b> ${escapeHtml(x.notes||"-")}</p><div class="item-actions"><button type="button" class="small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="small danger" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("") : "אין לו\"ז ביום זה";
+      };
+
+      renderSchedule = function() {
+        const el = document.getElementById("scheduleList"); if (!el) return;
+        const query = searchValue("scheduleSearch");
+        const items = [...schedules].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.location, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) { el.innerHTML = "אין עדיין לו\"ז"; return; }
+        const grouped = new Map();
+        items.forEach(x => { if (!grouped.has(x.date)) grouped.set(x.date, []); grouped.get(x.date).push(x); });
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div style="padding:8px 0;border-top:1px solid #fee2e2"><b>${escapeHtml(x.start || "")}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">משך: ${escapeHtml(x.duration || "")} דקות | מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      editSchedule = function(id) {
+        const x=schedules.find(i=>i.id===id); if(!x) return;
+        openScheduleModal(x.date);
+        document.getElementById("scheduleId").value=x.id;
+        document.getElementById("scheduleStart").value=x.start||"08:00";
+        document.getElementById("scheduleDuration").value=x.duration||60;
+        document.getElementById("scheduleTitle").value=x.title||"";
+        if (document.getElementById("scheduleLocation")) document.getElementById("scheduleLocation").value=x.location||"";
+        if (document.getElementById("scheduleParticipants")) document.getElementById("scheduleParticipants").value=x.participants||"";
+        document.getElementById("scheduleNotes").value=x.notes||"";
+      };
+
+      const oldForm = document.getElementById("scheduleForm");
+      if (oldForm) {
+        const newForm = oldForm.cloneNode(true);
+        oldForm.parentNode.replaceChild(newForm, oldForm);
+        document.getElementById("closeScheduleModal")?.addEventListener("click", () => document.getElementById("scheduleModal")?.classList.remove("open"));
+        newForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const id=document.getElementById("scheduleId").value||createId();
+          const item={
+            id,
+            date: document.getElementById("scheduleDate").value,
+            start: document.getElementById("scheduleStart").value || "08:00",
+            duration: document.getElementById("scheduleDuration").value,
+            title: document.getElementById("scheduleTitle").value.trim(),
+            location: (document.getElementById("scheduleLocation") ? document.getElementById("scheduleLocation").value.trim() : ""),
+            participants: (document.getElementById("scheduleParticipants") ? document.getElementById("scheduleParticipants").value.trim() : ""),
+            notes: document.getElementById("scheduleNotes").value.trim()
+          };
+          await saveScheduleToCloud(item);
+          openScheduleModal(item.date);
+        });
+      }
+
+      personHtml = function(p) {
+        return `<div class="item">
+          <h3>${escapeHtml(p.fullName || "")}</h3>
+          ${typeof colorTagHtml === "function" ? colorTagHtml(p.colorTag) : ""}
+          <p><b>תפקיד:</b> ${escapeHtml(p.role || "-")}</p>
+          <p><b>יחידה:</b> ${escapeHtml(p.unit || "-")}</p>
+          <p><b>מחלקה:</b> ${escapeHtml(p.department || "-")}</p>
+          <p><b>דרגה נוכחית:</b> ${escapeHtml(p.currentRank || "-")}</p>
+          <p><b>כפוף ל:</b> ${escapeHtml(supervisorName(p.supervisorId))}</p>
+          <p><b>תקופה:</b> ${formatDate(p.startDate) || "-"} עד ${formatDate(p.endDate) || "מכהן כיום / לא הוגדר"}</p>
+          <p><b>תאריך לקבלת דרגה:</b> ${formatDate(p.rankDate) || "-"}</p>
+          <p><b>יום הולדת:</b> ${formatDate(p.birthday) || "-"}</p>
+          <p><b>יום נישואין:</b> ${formatDate(p.anniversary) || "-"}</p>
+          <p><b>תמריצים / מענקים:</b> ${escapeHtml(p.incentives || "-")}</p>
+          <p><b>הערות:</b> ${escapeHtml(p.notes || "-")}</p>
+          <p><b>תאריך לביצוע הערה:</b> ${formatDate(p.noteDueDate) || "-"}</p>
+          <div class="item-actions">
+            <button type="button" class="small" onclick="editPerson('${p.id}')" title="עריכה" aria-label="עריכה">✏️</button>
+            <button type="button" class="small danger" onclick="deletePerson('${p.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button>
+          </div>
+        </div>`;
+      };
+
+      const rowsForExportV31Base = rowsForExport;
+      rowsForExport = function(kind) {
+        if (kind === "schedule" || kind === "calendar") return [["תאריך","שעה","משך","תוכן","מיקום","משתתפים","הערות"], ...schedules.map(x=>[x.date,x.start,x.duration,x.title,x.location||"",x.participants||"",x.notes])];
+        return rowsForExportV31Base(kind);
+      };
+
+      render();
+    })();
+
   </script>
 </body>
 </html>
