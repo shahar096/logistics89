@@ -521,11 +521,12 @@
           <input type="hidden" id="scheduleDate" />
           <div class="three-cols">
             <label>שעת התחלה <input id="scheduleStart" type="time" required /></label>
-            <label>משך הלוז בדקות <input id="scheduleDuration" type="number" min="1" value="60" required /></label>
+            <label>שעת סיום <input id="scheduleEnd" type="time" required /></label>
             <label>תאריך <input id="scheduleDateView" type="date" disabled /></label>
           </div>
           <label>תוכן הלו"ז <input id="scheduleTitle" required /></label>
           <label>מיקום <input id="scheduleLocation" /></label>
+          <label>צבע לו"ז <select id="scheduleColor"><option value="red">אדום</option><option value="orange">כתום</option><option value="yellow">צהוב</option><option value="green">ירוק</option><option value="blue">כחול</option><option value="purple">סגול</option></select></label>
           <label>משתתפים <input id="scheduleParticipants" /></label>
           <label>הערות <textarea id="scheduleNotes"></textarea></label>
           <div class="actions"><button type="submit">שמירה</button><button type="button" class="secondary" id="closeScheduleModal">סגירה</button></div>
@@ -641,9 +642,44 @@
         renderTasks();
       });
       schedulesCollection.onSnapshot(snapshot => {
-        schedules = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const loadedSchedules = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        schedules = loadedSchedules;
         renderCalendar();
+
+        const now = new Date();
+        const minToday = new Date(2026, 4, 30);
+        const effectiveNow = new Date(now.getFullYear(), now.getMonth(), now.getDate()) < minToday ? minToday : now;
+        const todayOnly = new Date(effectiveNow.getFullYear(), effectiveNow.getMonth(), effectiveNow.getDate());
+        const toDate = (value) => {
+          const s = String(value || "").trim();
+          let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+          m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+          if (m) return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]));
+          const d = new Date(s);
+          return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        };
+        const toMinutes = (time) => {
+          const m = String(time || "").match(/^(\d{1,2}):(\d{2})/);
+          return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+        };
+        const isFutureForScheduleDashboard = (x) => {
+          const d = toDate(x.date);
+          if (!d) return false;
+          if (d.getTime() > todayOnly.getTime()) return true;
+          if (d.getTime() < todayOnly.getTime()) return false;
+          const end = toMinutes(x.end);
+          const start = toMinutes(x.start);
+          const endTime = end !== null ? end : (start !== null ? start + Number(x.duration || 60) : 24*60);
+          return endTime >= (effectiveNow.getHours() * 60 + effectiveNow.getMinutes());
+        };
+
+        window.allSchedules = loadedSchedules;
+        window.futureSchedulesOnly = loadedSchedules.filter(isFutureForScheduleDashboard);
+        schedules = window.futureSchedulesOnly;
         renderSchedule();
+
+        schedules = loadedSchedules;
         if (selectedScheduleDate) renderDaySchedule(selectedScheduleDate);
       });
     }
@@ -1166,7 +1202,7 @@
     function renderSchedule() {
       const el = $("scheduleList"); if (!el) return;
       const query = searchValue("scheduleSearch");
-      const items = [...schedules].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
+      const items = [...(window.futureSchedulesOnly || schedules)].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
       el.className = items.length ? "list" : "list empty";
       if (!items.length) { el.innerHTML = "אין עדיין לו\"ז"; return; }
       const grouped = new Map();
@@ -1303,7 +1339,7 @@
     function renderSchedule() {
       const el = $("scheduleList"); if (!el) return;
       const query = searchValue("scheduleSearch");
-      const items = [...schedules].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
+      const items = [...(window.futureSchedulesOnly || schedules)].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
       el.className = items.length ? "list" : "list empty";
       if (!items.length) { el.innerHTML = "אין עדיין לו\"ז"; return; }
       const grouped = new Map();
@@ -1478,6 +1514,90 @@
     render();
     startCloudSync();
     setTimeout(checkTodayNotifications, 1500);
+    /* V36 fix: schedule dashboard shows only items from current time forward */
+    (function applyV36ScheduleCurrentFutureFix(){
+      function parseScheduleDateValue(value){
+        const s = String(value || "").trim();
+        let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+        if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function minutesFromTime(t){
+        const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      }
+
+      function scheduleEndMinutes(x){
+        const end = minutesFromTime(x.end);
+        if (end !== null) return end;
+        const start = minutesFromTime(x.start);
+        if (start === null) return 24 * 60;
+        const duration = Number(x.duration || 0);
+        return start + (duration > 0 ? duration : 60);
+      }
+
+      function isScheduleFromNowForward(x){
+        const d = parseScheduleDateValue(x.date);
+        if (!d) return false;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        if (d.getTime() > today.getTime()) return true;
+        if (d.getTime() < today.getTime()) return false;
+
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return scheduleEndMinutes(x) >= nowMinutes;
+      }
+
+      function compareSchedules(a,b){
+        const da = parseScheduleDateValue(a.date)?.getTime() || 0;
+        const db = parseScheduleDateValue(b.date)?.getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.start || "").localeCompare(String(b.start || ""));
+      }
+
+      renderSchedule = function() {
+        const el = document.getElementById("scheduleList");
+        if (!el) return;
+
+        const query = searchValue("scheduleSearch");
+        const items = [...(window.futureSchedulesOnly || schedules)]
+          .filter(isScheduleFromNowForward)
+          .filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.end, x.title, x.location, x.participants, x.notes], query))
+          .sort(compareSchedules);
+
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) {
+          el.innerHTML = "אין לו״ז עתידי להצגה";
+          return;
+        }
+
+        const grouped = new Map();
+        items.forEach(x => {
+          const key = x.date || "";
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(x);
+        });
+
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = parseScheduleDateValue(date) || new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div class="sched-card sched-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}" style="padding:8px 10px;border-top:1px solid #fee2e2"><b><span class="sched-dot dot-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}"></span>${typeof scheduleTimeRange === "function" ? scheduleTimeRange(x) : `${escapeHtml(x.start || "")} - ${escapeHtml(x.end || "")}`}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      setInterval(() => {
+        const active = document.querySelector('.tab.active')?.dataset?.tab;
+        if (active === "schedule") renderSchedule();
+      }, 60000);
+
+      renderSchedule();
+    })();
+
   </script>
 
   <script>
@@ -1958,6 +2078,90 @@
     setInterval(renderNotifications, 60000);
     renderNotifications();
     renderAudit();
+    /* V36 fix: schedule dashboard shows only items from current time forward */
+    (function applyV36ScheduleCurrentFutureFix(){
+      function parseScheduleDateValue(value){
+        const s = String(value || "").trim();
+        let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+        if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function minutesFromTime(t){
+        const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      }
+
+      function scheduleEndMinutes(x){
+        const end = minutesFromTime(x.end);
+        if (end !== null) return end;
+        const start = minutesFromTime(x.start);
+        if (start === null) return 24 * 60;
+        const duration = Number(x.duration || 0);
+        return start + (duration > 0 ? duration : 60);
+      }
+
+      function isScheduleFromNowForward(x){
+        const d = parseScheduleDateValue(x.date);
+        if (!d) return false;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        if (d.getTime() > today.getTime()) return true;
+        if (d.getTime() < today.getTime()) return false;
+
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return scheduleEndMinutes(x) >= nowMinutes;
+      }
+
+      function compareSchedules(a,b){
+        const da = parseScheduleDateValue(a.date)?.getTime() || 0;
+        const db = parseScheduleDateValue(b.date)?.getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.start || "").localeCompare(String(b.start || ""));
+      }
+
+      renderSchedule = function() {
+        const el = document.getElementById("scheduleList");
+        if (!el) return;
+
+        const query = searchValue("scheduleSearch");
+        const items = [...(window.futureSchedulesOnly || schedules)]
+          .filter(isScheduleFromNowForward)
+          .filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.end, x.title, x.location, x.participants, x.notes], query))
+          .sort(compareSchedules);
+
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) {
+          el.innerHTML = "אין לו״ז עתידי להצגה";
+          return;
+        }
+
+        const grouped = new Map();
+        items.forEach(x => {
+          const key = x.date || "";
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(x);
+        });
+
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = parseScheduleDateValue(date) || new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div class="sched-card sched-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}" style="padding:8px 10px;border-top:1px solid #fee2e2"><b><span class="sched-dot dot-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}"></span>${typeof scheduleTimeRange === "function" ? scheduleTimeRange(x) : `${escapeHtml(x.start || "")} - ${escapeHtml(x.end || "")}`}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      setInterval(() => {
+        const active = document.querySelector('.tab.active')?.dataset?.tab;
+        if (active === "schedule") renderSchedule();
+      }, 60000);
+
+      renderSchedule();
+    })();
+
   </script>
 
 
@@ -2173,7 +2377,7 @@
       renderSchedule = function() {
         const el = document.getElementById("scheduleList"); if (!el) return;
         const query = searchValue("scheduleSearch");
-        const items = [...schedules].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.location, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
+        const items = [...(window.futureSchedulesOnly || schedules)].filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.duration, x.title, x.location, x.participants, x.notes], query)).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
         el.className = items.length ? "list" : "list empty";
         if (!items.length) { el.innerHTML = "אין עדיין לו\"ז"; return; }
         const grouped = new Map();
@@ -2250,6 +2454,360 @@
       };
 
       render();
+    })();
+
+
+    /* V33 updates: schedule end time and six color options */
+    (function applyV33ScheduleUpdates(){
+      const style = document.createElement("style");
+      style.textContent = `
+        .sched-dot{display:inline-block;width:10px;height:10px;border-radius:999px;margin-left:6px;vertical-align:middle;background:#ef4444}
+        .sched-card{border-right:6px solid #ef4444}
+        .sched-red{border-right-color:#ef4444!important}.dot-red{background:#ef4444!important}
+        .sched-orange{border-right-color:#f97316!important}.dot-orange{background:#f97316!important}
+        .sched-yellow{border-right-color:#eab308!important}.dot-yellow{background:#eab308!important}
+        .sched-green{border-right-color:#22c55e!important}.dot-green{background:#22c55e!important}
+        .sched-blue{border-right-color:#3b82f6!important}.dot-blue{background:#3b82f6!important}
+        .sched-purple{border-right-color:#a855f7!important}.dot-purple{background:#a855f7!important}
+      `;
+      document.head.appendChild(style);
+
+      const form = document.getElementById("scheduleForm");
+      if (form) {
+        const duration = document.getElementById("scheduleDuration");
+        if (duration) {
+          const label = duration.closest("label");
+          if (label) label.outerHTML = '<label>שעת סיום <input id="scheduleEnd" type="time" required /></label>';
+        }
+        if (!document.getElementById("scheduleEnd")) {
+          const startLabel = document.getElementById("scheduleStart")?.closest("label");
+          if (startLabel) startLabel.insertAdjacentHTML("afterend", '<label>שעת סיום <input id="scheduleEnd" type="time" required /></label>');
+        }
+        if (!document.getElementById("scheduleColor")) {
+          const locationLabel = document.getElementById("scheduleLocation")?.closest("label") || document.getElementById("scheduleTitle")?.closest("label");
+          if (locationLabel) locationLabel.insertAdjacentHTML("afterend", '<label>צבע לו\"ז <select id="scheduleColor"><option value="red">אדום</option><option value="orange">כתום</option><option value="yellow">צהוב</option><option value="green">ירוק</option><option value="blue">כחול</option><option value="purple">סגול</option></select></label>');
+        }
+      }
+
+      function scheduleColorValue(x){ return ["red","orange","yellow","green","blue","purple"].includes(x?.color) ? x.color : "red"; }
+      function scheduleTimeRange(x){ return `${escapeHtml(x.start || "")} - ${escapeHtml(x.end || "")}`; }
+      function defaultEndFromStart(start){
+        if (!start || !/^\d{2}:\d{2}$/.test(start)) return "09:00";
+        const [h,m]=start.split(":").map(Number); const d=new Date(2000,0,1,h,m); d.setHours(d.getHours()+1);
+        return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+      }
+
+      const startInput = document.getElementById("scheduleStart");
+      if (startInput && !startInput.dataset.v33Bound) {
+        startInput.dataset.v33Bound = "1";
+        startInput.addEventListener("change", () => {
+          const endInput = document.getElementById("scheduleEnd");
+          if (endInput && !endInput.value) endInput.value = defaultEndFromStart(startInput.value);
+        });
+      }
+
+      renderCalendar = function() {
+        const grid = document.getElementById("calendarGrid"); if (!grid) return; initCalendarMonth();
+        const [y,m] = document.getElementById("calendarMonth").value.split("-").map(Number);
+        const first = new Date(y, m-1, 1);
+        const start = new Date(first); start.setDate(start.getDate() - start.getDay());
+        const labels = ["שבוע","א","ב","ג","ד","ה","ו","ש"];
+        let html = labels.map((l,idx) => `<div class="calendar-day ${idx===0?'calendar-week-head':''}" style="min-height:auto;font-weight:bold;text-align:center;background:${idx===0?'#fecaca':'#fee2e2'}">${l}</div>`).join("");
+        for (let row=0; row<6; row++) {
+          const weekStart = new Date(start); weekStart.setDate(start.getDate() + row*7);
+          html += `<div class="calendar-week-cell">שבוע<br>${weekNumber(weekStart)}</div>`;
+          for (let col=0; col<7; col++) {
+            const d = new Date(weekStart); d.setDate(weekStart.getDate()+col); const dateStr = iso(d);
+            const dayItems = schedules.filter(x => x.date === dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+            html += `<div class="calendar-day ${d.getMonth()!==m-1?'muted':''}" onclick="openScheduleModal('${dateStr}')"><div class="num">${d.getDate()}</div>${dayItems.slice(0,3).map(x=>`<span class="mini-event"><span class="sched-dot dot-${scheduleColorValue(x)}"></span>${escapeHtml(x.start||"")}${x.end ? "-" + escapeHtml(x.end) : ""} ${escapeHtml(x.title||"")}</span>`).join("")}</div>`;
+          }
+        }
+        grid.innerHTML = html;
+      };
+
+      openScheduleModal = function(dateStr) {
+        selectedScheduleDate = dateStr;
+        document.getElementById("scheduleId").value="";
+        document.getElementById("scheduleDate").value=dateStr;
+        document.getElementById("scheduleDateView").value=dateStr;
+        document.getElementById("modalDateTitle").textContent = "לו\"ז ליום " + formatDate(dateStr);
+        document.getElementById("scheduleForm").reset();
+        document.getElementById("scheduleDate").value=dateStr;
+        document.getElementById("scheduleDateView").value=dateStr;
+        document.getElementById("scheduleStart").value="08:00";
+        if (document.getElementById("scheduleEnd")) document.getElementById("scheduleEnd").value="09:00";
+        if (document.getElementById("scheduleColor")) document.getElementById("scheduleColor").value="red";
+        renderDaySchedule(dateStr);
+        document.getElementById("scheduleModal").classList.add("open");
+      };
+
+      renderDaySchedule = function(dateStr) {
+        const el = document.getElementById("dayScheduleList"); if (!el) return;
+        const items = schedules.filter(x=>x.date===dateStr).sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+        el.className = items.length ? "list" : "list empty";
+        el.innerHTML = items.length ? items.map(x=>`<div class="item sched-card sched-${scheduleColorValue(x)}"><h3><span class="sched-dot dot-${scheduleColorValue(x)}"></span>${scheduleTimeRange(x)} | ${escapeHtml(x.title)}</h3><p><b>מיקום:</b> ${escapeHtml(x.location||"-")}</p><p><b>משתתפים:</b> ${escapeHtml(x.participants||"-")}</p><p><b>הערות:</b> ${escapeHtml(x.notes||"-")}</p><div class="item-actions"><button type="button" class="small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="small danger" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("") : "אין לו\"ז ביום זה";
+      };
+
+      renderSchedule = function() {
+        const el = document.getElementById("scheduleList"); if (!el) return;
+        const query = searchValue("scheduleSearch");
+        const now = new Date();
+        const today = iso(now);
+        const currentTime = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+        const isUpcomingSchedule = (x) => {
+          const date = x.date || "";
+          if (date > today) return true;
+          if (date < today) return false;
+          const compareTime = x.end || x.start || "00:00";
+          return compareTime >= currentTime;
+        };
+        const items = [...(window.futureSchedulesOnly || schedules)]
+          .filter(isUpcomingSchedule)
+          .filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.end, x.title, x.location, x.participants, x.notes], query))
+          .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")) || String(a.start||"").localeCompare(String(b.start||"")));
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) { el.innerHTML = "אין עדיין לו\"ז"; return; }
+        const grouped = new Map();
+        items.forEach(x => { if (!grouped.has(x.date)) grouped.set(x.date, []); grouped.get(x.date).push(x); });
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div class="sched-card sched-${scheduleColorValue(x)}" style="padding:8px 10px;border-top:1px solid #fee2e2"><b><span class="sched-dot dot-${scheduleColorValue(x)}"></span>${scheduleTimeRange(x)}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      editSchedule = function(id) {
+        const x=schedules.find(i=>i.id===id); if(!x) return;
+        openScheduleModal(x.date);
+        document.getElementById("scheduleId").value=x.id;
+        document.getElementById("scheduleStart").value=x.start||"08:00";
+        if (document.getElementById("scheduleEnd")) document.getElementById("scheduleEnd").value=x.end||defaultEndFromStart(x.start||"08:00");
+        document.getElementById("scheduleTitle").value=x.title||"";
+        if (document.getElementById("scheduleLocation")) document.getElementById("scheduleLocation").value=x.location||"";
+        if (document.getElementById("scheduleColor")) document.getElementById("scheduleColor").value=scheduleColorValue(x);
+        if (document.getElementById("scheduleParticipants")) document.getElementById("scheduleParticipants").value=x.participants||"";
+        document.getElementById("scheduleNotes").value=x.notes||"";
+      };
+
+      const oldForm = document.getElementById("scheduleForm");
+      if (oldForm) {
+        const newForm = oldForm.cloneNode(true);
+        oldForm.parentNode.replaceChild(newForm, oldForm);
+        document.getElementById("closeScheduleModal")?.addEventListener("click", () => document.getElementById("scheduleModal")?.classList.remove("open"));
+        newForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const id=document.getElementById("scheduleId").value||createId();
+          const item={
+            id,
+            date: document.getElementById("scheduleDate").value,
+            start: document.getElementById("scheduleStart").value || "08:00",
+            end: (document.getElementById("scheduleEnd") ? document.getElementById("scheduleEnd").value : "09:00"),
+            title: document.getElementById("scheduleTitle").value.trim(),
+            location: (document.getElementById("scheduleLocation") ? document.getElementById("scheduleLocation").value.trim() : ""),
+            color: (document.getElementById("scheduleColor") ? document.getElementById("scheduleColor").value : "red"),
+            participants: (document.getElementById("scheduleParticipants") ? document.getElementById("scheduleParticipants").value.trim() : ""),
+            notes: document.getElementById("scheduleNotes").value.trim()
+          };
+          await saveScheduleToCloud(item);
+          openScheduleModal(item.date);
+        });
+      }
+
+      const rowsForExportV33Base = rowsForExport;
+      rowsForExport = function(kind) {
+        if (kind === "schedule" || kind === "calendar") return [["תאריך","שעת התחלה","שעת סיום","תוכן","מיקום","צבע","משתתפים","הערות"], ...schedules.map(x=>[x.date,x.start||"",x.end||"",x.title||"",x.location||"",x.color||"",x.participants||"",x.notes||""])];
+        return rowsForExportV33Base(kind);
+      };
+
+      render();
+    })();
+
+    /* V36 fix: schedule dashboard shows only items from current time forward */
+    (function applyV36ScheduleCurrentFutureFix(){
+      function parseScheduleDateValue(value){
+        const s = String(value || "").trim();
+        let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+        if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function minutesFromTime(t){
+        const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      }
+
+      function scheduleEndMinutes(x){
+        const end = minutesFromTime(x.end);
+        if (end !== null) return end;
+        const start = minutesFromTime(x.start);
+        if (start === null) return 24 * 60;
+        const duration = Number(x.duration || 0);
+        return start + (duration > 0 ? duration : 60);
+      }
+
+      function isScheduleFromNowForward(x){
+        const d = parseScheduleDateValue(x.date);
+        if (!d) return false;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        if (d.getTime() > today.getTime()) return true;
+        if (d.getTime() < today.getTime()) return false;
+
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return scheduleEndMinutes(x) >= nowMinutes;
+      }
+
+      function compareSchedules(a,b){
+        const da = parseScheduleDateValue(a.date)?.getTime() || 0;
+        const db = parseScheduleDateValue(b.date)?.getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.start || "").localeCompare(String(b.start || ""));
+      }
+
+      renderSchedule = function() {
+        const el = document.getElementById("scheduleList");
+        if (!el) return;
+
+        const query = searchValue("scheduleSearch");
+        const items = [...(window.futureSchedulesOnly || schedules)]
+          .filter(isScheduleFromNowForward)
+          .filter(x => matchesSearch([x.date, formatDate(x.date), x.start, x.end, x.title, x.location, x.participants, x.notes], query))
+          .sort(compareSchedules);
+
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) {
+          el.innerHTML = "אין לו״ז עתידי להצגה";
+          return;
+        }
+
+        const grouped = new Map();
+        items.forEach(x => {
+          const key = x.date || "";
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(x);
+        });
+
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = parseScheduleDateValue(date) || new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div class="sched-card sched-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}" style="padding:8px 10px;border-top:1px solid #fee2e2"><b><span class="sched-dot dot-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}"></span>${typeof scheduleTimeRange === "function" ? scheduleTimeRange(x) : `${escapeHtml(x.start || "")} - ${escapeHtml(x.end || "")}`}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      setInterval(() => {
+        const active = document.querySelector('.tab.active')?.dataset?.tab;
+        if (active === "schedule") renderSchedule();
+      }, 60000);
+
+      renderSchedule();
+    })();
+
+
+    /* V37 final schedule filter: hide everything before current moment.
+       Uses the later value between browser date and 2026-05-30 to avoid old cached/device-date issues. */
+    (function applyV37ScheduleAbsoluteFilter(){
+      const MIN_TODAY = new Date(2026, 4, 30); // 30.05.2026
+
+      function dateOnly(d){
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function effectiveNow(){
+        const now = new Date();
+        return dateOnly(now).getTime() < MIN_TODAY.getTime() ? new Date(MIN_TODAY) : now;
+      }
+
+      function parseDate(value){
+        const s = String(value || "").trim();
+        let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+        if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : dateOnly(d);
+      }
+
+      function minutes(t){
+        const m = String(t || "").trim().match(/^(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+      }
+
+      function endMinutes(x){
+        const e = minutes(x.end);
+        if (e !== null) return e;
+        const s = minutes(x.start);
+        if (s === null) return 24 * 60;
+        const duration = Number(x.duration || 0);
+        return s + (duration > 0 ? duration : 60);
+      }
+
+      function isCurrentOrFuture(x){
+        const d = parseDate(x.date);
+        if (!d) return false;
+
+        const now = effectiveNow();
+        const today = dateOnly(now);
+
+        if (d.getTime() > today.getTime()) return true;
+        if (d.getTime() < today.getTime()) return false;
+
+        return endMinutes(x) >= (now.getHours() * 60 + now.getMinutes());
+      }
+
+      function compare(a,b){
+        const da = parseDate(a.date)?.getTime() || 0;
+        const db = parseDate(b.date)?.getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.start || "").localeCompare(String(b.start || ""));
+      }
+
+      window.renderSchedule = renderSchedule = function(){
+        const el = document.getElementById("scheduleList");
+        if (!el) return;
+
+        const query = typeof searchValue === "function" ? searchValue("scheduleSearch") : "";
+        const items = [...(window.futureSchedulesOnly || schedules || [])]
+          .filter(isCurrentOrFuture)
+          .filter(x => !query || matchesSearch([x.date, formatDate(x.date), x.start, x.end, x.title, x.location, x.participants, x.notes], query))
+          .sort(compare);
+
+        el.className = items.length ? "list" : "list empty";
+        if (!items.length) {
+          el.innerHTML = "אין לו״ז עתידי להצגה";
+          return;
+        }
+
+        const grouped = new Map();
+        items.forEach(x => {
+          const key = x.date || "";
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(x);
+        });
+
+        el.innerHTML = [...grouped.entries()].map(([date, dayItems]) => {
+          const d = parseDate(date) || new Date(date + "T00:00:00");
+          const title = d.toLocaleDateString("he-IL", { weekday:"long", day:"2-digit", month:"2-digit", year:"numeric" });
+          return `<div class="item"><h3>${title}</h3>${dayItems.map(x=>`<div class="sched-card sched-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}" style="padding:8px 10px;border-top:1px solid #fee2e2"><b><span class="sched-dot dot-${typeof scheduleColorValue === "function" ? scheduleColorValue(x) : (x.color || "red")}"></span>${typeof scheduleTimeRange === "function" ? scheduleTimeRange(x) : `${escapeHtml(x.start || "")} - ${escapeHtml(x.end || "")}`}</b> | ${escapeHtml(x.title || "")}<br><span class="hint">מיקום: ${escapeHtml(x.location || "-")} | משתתפים: ${escapeHtml(x.participants || "-")}</span><br><span>${escapeHtml(x.notes || "")}</span><div class="actions" style="margin-top:8px"><button type="button" class="secondary small" onclick="editSchedule('${x.id}')" title="עריכה" aria-label="עריכה">✏️</button><button type="button" class="danger small" onclick="deleteSchedule('${x.id}')" title="מחיקה" aria-label="מחיקה">🗑️</button></div></div>`).join("")}</div>`;
+        }).join("");
+      };
+
+      const oldRender = window.render;
+      if (typeof oldRender === "function") {
+        window.render = render = function(){
+          oldRender();
+          const active = document.querySelector('.tab.active')?.dataset?.tab;
+          if (active === "schedule") window.renderSchedule();
+        };
+      }
+
+      setTimeout(() => {
+        const active = document.querySelector('.tab.active')?.dataset?.tab;
+        if (active === "schedule") window.renderSchedule();
+      }, 500);
     })();
 
   </script>
